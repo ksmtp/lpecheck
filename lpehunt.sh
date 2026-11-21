@@ -1,8 +1,8 @@
 #!/bin/bash
-# lpecheck.sh - detect known Linux local privilege-escalation CVEs. DETECTION ONLY.
+# lpehunt.sh - detect known Linux local privilege-escalation CVEs. DETECTION ONLY.
 #
-#   bash lpecheck.sh [-v] [--tsv] [--no-probes]
-#   curl -s http://me/lpecheck.sh | bash            (| bash -s -- -v   for options)
+#   bash lpehunt.sh [-v] [--tsv] [--no-probes]
+#   curl -s http://me/lpehunt.sh | bash            (| bash -s -- -v   for options)
 #
 #   -v           also list every CVE that was ruled out, with the reason
 #   --tsv        machine-readable: STATUS<TAB>CVE<TAB>component<TAB>path<TAB>reason
@@ -45,8 +45,26 @@
 #        sudo pager, glibc $ORIGIN / LD_AUDIT, sock_sendpage, af_packet
 #        (chocobo_root), DCCP, eBPF ALU32. FIXDB value "unfixed" = that release
 #        never got a fix. Debian 5/6 (lenny/squeeze) codenames.
+#   1.3  renamed lpecheck -> lpehunt (matches credhunt / lfihunt).
+#        26 kernel rows to cover what current linPEAS flags: the 2026 page-cache
+#        family (Dirty Frag xfrm/rxrpc, Fragnesia, DirtyClone, pedit COW, Copy
+#        Fail, DirtyDecrypt), ptrace exit-race, GhostLock, BadGarbage, Bad Epoll,
+#        OVSwrap, AF_UNIX MSG_OOB, posix-cpu-timers, vsock x2, io_uring, StackRot,
+#        nf_tables x4, openvswitch, watch_queue, Sequoia. Real NVD lower bounds
+#        (linPEAS uses >=6.19 for bugs that reach back to 3.x). Module checks
+#        honour modprobe.d "install X /bin/false" / blacklist mitigations, except
+#        for built-in code; kernel config read from /boot/config or /proc/config.gz.
+#        Batch 2, the rest of linPEAS's CVE checks: CIFSwitch, DiagSpill, net/sched
+#        53264 + 21702, nft catchall, AF_ALG 39964, ALSA UMP, OVS page-cache chain,
+#        XFSTango, RefluXFS, IPv6 fraggap, SCTPhantom, VsockDrop, ZcopyReaper,
+#        CrackArmor, iSCSI, XFRM lucky0, subuid shell, rds 5333, af_packet 7308,
+#        SO_SNDBUFFORCE, keyring, ovl_setattr; userspace: snap-confine 8933 / 3888,
+#        Pack2TheRoot (PackageKit), libblockdev/udisks2 6019 + SUSE PAM 6018,
+#        UDisks fstab 7867, AccountsService 61897, systemd-homed 16742, inetutils
+#        telnetd 24061, below 27591, netdata ndsudo 32019, runc Leaky Vessels,
+#        OpenDoas 28339 / 25016. FIXDB "k=SERIES-unfixed" = supported, no fix yet.
 
-LPE_VERSION="1.2"
+LPE_VERSION="1.3"
 
 # id | name | component | affected | preconditions | probe | reference
 #   affected: one or more "LO:FIX[,FIX...]" specs (upstream versions). Affected
@@ -99,6 +117,68 @@ CVE-2009-2692  | sock_sendpage NULL deref (wunderbar_emporium) | kernel | 2.4.4:
 CVE-2016-8655  | af_packet race (chocobo_root) | kernel | 3.2:3.2.85,3.10.106,3.12.69,3.16.40,3.18.46,4.1.37,4.4.38,4.8.14 | userns | - | https://www.exploit-db.com/exploits/40871
 CVE-2017-6074  | DCCP double free | kernel | 2.6.14:3.2.86,3.10.106,3.12.71,3.16.41,3.18.49,4.1.41,4.4.52,4.9.13 | dccp | - | https://www.exploit-db.com/exploits/41458
 CVE-2021-3490  | eBPF ALU32 bounds tracking | kernel | 5.7:5.10.37,5.11.21,5.12.4 | ubpf | - | https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story
+CVE-2026-43284 | Dirty Frag (xfrm ESP page-cache write) | kernel | 4.11:5.10.255,5.15.205,6.1.171,6.6.138,6.12.87,6.18.28,7.0.5 | userns esp | - | https://ubuntu.com/blog/dirty-frag-linux-vulnerability-fixes-available
+CVE-2026-43500 | Dirty Frag (rxrpc page-cache write) | kernel | 5.3:6.18.29,7.0.6 | userns rxrpc | - | https://ubuntu.com/blog/dirty-frag-linux-vulnerability-fixes-available
+CVE-2026-46300 | Fragnesia (ESP-in-TCP, Dirty Frag bypass) | kernel | 3.9:5.10.258,5.15.208,6.1.174,6.6.141,6.12.91,6.18.33,7.0.10 | userns esp espintcp | - | https://www.openwall.com/lists/oss-security/2026/05/13/3
+CVE-2026-43503 | DirtyClone | kernel | 3.9:5.10.257,5.15.208,6.1.174,6.6.141,6.12.91,6.18.33,7.0.10 | userns esp | - | https://research.jfrog.com/post/dissecting-and-exploiting-linux-lpe-variant-dirtyclone-cve-2026-43503
+CVE-2026-46331 | pedit COW (act_pedit) | kernel | 4.19.244:4.20 5.4.195:5.5 5.10.117:5.11 5.15.41:5.16 5.17.9:6.12.94,6.18.36,7.0.13 | userns act_pedit | - | https://github.com/sgkdev/packet_edit_meme
+CVE-2026-46333 | ptrace exit-race (pidfd_getfd) | kernel | 3.16.52:3.17 4.4.40:4.5 4.8.16:4.9 4.9.1:5.10.256,5.15.207,6.1.173,6.6.139,6.12.89,6.18.31,7.0.8 | ptrace_scope | - | https://cdn2.qualys.com/advisory/2026/05/20/cve-2026-46333-ptrace.txt
+CVE-2026-43499 | GhostLock (rtmutex PI futex UAF) | kernel | 2.6.39:6.1.175,6.6.140,6.12.86,6.18.27,7.0.4 | futex_pi | - | https://github.com/NebuSec/CyberMeowfia/tree/main/IonStack/CVE-2026-43499
+CVE-2026-53361 | BadGarbage (AF_UNIX GC race) | kernel | 6.1.141:6.2 6.6.93:6.6.144 6.9:6.12.95,6.18.38,7.1 | - | - | https://github.com/sgkdev/bad_garbage
+CVE-2026-31431 | Copy Fail (algif_aead page-cache write) | kernel | 4.14:5.10.254,5.15.204,6.1.170,6.6.137,6.12.85,6.18.22,6.19.12 | algif_aead | - | https://github.com/theori-io/copy-fail-CVE-2026-31431
+CVE-2026-46242 | Bad Epoll (epoll UAF) | kernel | 5.15.209:5.16 6.1.175:6.2 6.4:6.18.33,7.0.10 | - | - | https://github.com/J-jaeyoung/bad-epoll
+CVE-2026-64531 | OVSwrap (openvswitch integer wrap) | kernel | 5.15.180:5.15.212 6.1.132:6.1.178 6.6.84:6.6.145 6.12.20:6.12.97 6.13.8:6.14 6.14.1:6.18.40,7.1.5 | userns openvswitch | - | https://github.com/manizada/OVSwrap
+CVE-2026-31635 | DirtyDecrypt (rxgk missing COW) | kernel | 6.16:6.18.23,6.19.13 | rxgk | - | https://github.com/v12-security/pocs/tree/main/dirtydecrypt
+CVE-2025-38236 | AF_UNIX MSG_OOB use-after-free | kernel | 5.15:5.15.194,6.1.143,6.6.96,6.12.36,6.15.5 | unix_oob | - | https://googleprojectzero.blogspot.com/2025/08/from-chrome-renderer-code-exec-to-kernel.html
+CVE-2025-38352 | posix-cpu-timers exit race | kernel | 2.6.36:5.4.295,5.10.239,5.15.186,6.1.142,6.6.94,6.12.34,6.15.3 | - | - | https://nvd.nist.gov/vuln/detail/CVE-2025-38352
+CVE-2025-21756 | Attack of the Vsock (vsock UAF) | kernel | 5.5:5.10.235,5.15.179,6.1.131,6.6.79,6.12.16,6.13.4 | vsock | - | https://blog.theori.io/attack-of-the-vsock-cve-2025-21756-ea0c33f84e7b
+CVE-2024-50264 | vsock virtio UAF | kernel | 4.8:4.19.324,5.4.286,5.10.230,5.15.172,6.1.117,6.6.61,6.11.8 | vsock | - | https://nvd.nist.gov/vuln/detail/CVE-2024-50264
+CVE-2024-0582  | io_uring PROVIDE_BUFFERS page UAF | kernel | 6.4:6.6.5 | io_uring | - | https://github.com/ysanatomic/io_uring_LPE-CVE-2024-0582
+CVE-2023-35001 | nf_tables nft_byteorder OOB | kernel | 3.13:4.14.322,4.19.291,5.4.251,5.10.188,5.15.121,6.1.39,6.4.4 | userns nft | - | https://www.exodusintel.com/2023/09/20/cve-2023-35001-linux-kernel-oob/
+CVE-2023-0179  | nf_tables nft_payload stack overflow | kernel | 5.5:5.10.164,5.15.89,6.1.7 | userns nft | - | https://github.com/TurtleARM/CVE-2023-0179-PoC
+CVE-2023-3269  | StackRot (maple tree VMA UAF) | kernel | 6.1:6.1.37,6.3.11,6.4.1 | - | - | https://github.com/lrh2000/StackRot
+CVE-2022-32250 | nf_tables set UAF | kernel | 4.1:4.9.318,4.14.283,4.19.247,5.4.198,5.10.120,5.15.45,5.17.13,5.18.2 | userns nft | - | https://research.nccgroup.com/2022/09/01/settlers-of-netlink-exploiting-a-limited-uaf-in-nf_tables-cve-2022-32250/
+CVE-2022-2586  | nf_tables cross-table UAF | kernel | 3.16:4.14.316,4.19.256,5.4.211,5.10.137,5.15.61,5.18.18,5.19.2 | userns nft | - | https://www.openwall.com/lists/oss-security/2022/08/29/5
+CVE-2022-2639  | openvswitch reserve_sfa_size OOB | kernel | 3.18.139:3.19 4.4.179:4.5 4.9.169:4.9.312 4.14.112:4.14.277 4.19.35:4.19.240 5.0.8:5.4.191,5.10.113,5.15.36,5.17.5 | userns openvswitch | - | https://github.com/avboy1337/CVE-2022-2639-PipeVersion
+CVE-2022-0995  | watch_queue OOB write | kernel | 5.8:5.10.106,5.15.29,5.16.5 | watch_queue | - | https://github.com/Bonfee/CVE-2022-0995
+CVE-2026-46243 | CIFSwitch (cifs.spnego key description) | kernel | 2.6.24:5.10.258,5.15.209,6.1.175,6.6.142,6.12.92,6.18.34,7.0.11 | cifs_spnego | - | https://nvd.nist.gov/vuln/detail/CVE-2026-46243
+CVE-2026-74469 | DiagSpill (sctp_diag) | kernel | 4.7:5.10.265,5.15.216,6.1.183,6.6.151,6.12.103,6.18.44,7.1.8 | sctp_diag | - | https://nvd.nist.gov/vuln/detail/CVE-2026-74469
+CVE-2026-53264 | net/sched action use-after-free | kernel | 4.14:5.10.259,5.15.210,6.1.176,6.6.143,6.12.94,6.18.36,7.0.13 | userns net_sched | - | https://nvd.nist.gov/vuln/detail/CVE-2026-53264
+CVE-2026-23111 | nf_tables catchall verdict-map UAF | kernel | 4.19.316:4.20 5.4.262:5.5 5.10.188:5.11 5.15.121:5.15.200 6.1.36:6.1.163 6.3.10:6.4 6.4:6.6.124,6.12.70,6.18.10 | userns nft | - | https://nvd.nist.gov/vuln/detail/CVE-2026-23111
+CVE-2025-39964 | AF_ALG concurrent writers | kernel | 2.6.38:5.10.245,5.15.194,6.1.154,6.6.108,6.12.49,6.16.9 | af_alg | - | https://nvd.nist.gov/vuln/detail/CVE-2025-39964
+CVE-2025-37891 | ALSA UMP SysEx overflow | kernel | 6.5:6.6.90,6.12.28,6.14.6 | snd_ump | - | https://nvd.nist.gov/vuln/detail/CVE-2025-37891
+CVE-2026-80977/CVE-2026-89487/CVE-2026-90049 | openvswitch forwarded-skb page-cache chain | kernel | 3.14:5.10.270,5.15.221,6.1.188,6.6.157,6.12.110,6.18.51,7.2.5 | userns openvswitch esp | - | https://nvd.nist.gov/vuln/detail/CVE-2026-80977
+CVE-2026-80530 | XFSTango (XFS reflink race) | kernel | 6.10:6.12.105,6.18.46,7.1.10 | xfs_reflink | - | https://nvd.nist.gov/vuln/detail/CVE-2026-80530
+CVE-2026-64600 | RefluXFS (XFS stale mapping race) | kernel | 4.11:5.15.212,6.1.178,6.6.145,6.12.96,6.18.39,7.1.4 | xfs_reflink | - | https://nvd.nist.gov/vuln/detail/CVE-2026-64600
+CVE-2026-53362 | IPv6 fraggap OOB write | kernel | 6.0:6.1.177,6.6.144,6.12.95,6.18.38,7.1.3 | ipv6 | - | https://nvd.nist.gov/vuln/detail/CVE-2026-53362
+CVE-2026-64564 | SCTPhantom (SCTP ASCONF UAF) | kernel | 2.6.25:5.10.265,5.15.216,6.1.183,6.6.148,6.12.101,6.18.42,7.1.6 | sctp | - | https://nvd.nist.gov/vuln/detail/CVE-2026-64564
+CVE-2026-53365 | VsockDrop (vsock zerocopy refcount) | kernel | 6.7:6.18.34,7.0.11 | vsock io_uring | - | https://nvd.nist.gov/vuln/detail/CVE-2026-53365
+CVE-2026-43502 | ZcopyReaper (RDS zerocopy UAF) | kernel | 4.17:5.10.258,5.15.209,6.1.175,6.6.140,6.12.88,6.18.30,7.0.7 | rds_tcp | - | https://nvd.nist.gov/vuln/detail/CVE-2026-43502
+CVE-2025-21702 | net/sched pfifo_tail_enqueue UAF | kernel | 2.6.34:5.4.291,5.10.235,5.15.179,6.1.130,6.6.83,6.12.14,6.13.3 | userns | - | https://nvd.nist.gov/vuln/detail/CVE-2025-21702
+CVE-2021-27365 | iSCSI netlink heap overflow | kernel | 2.6.12:4.4.260,4.9.260,4.14.224,4.19.179,5.4.103,5.10.21,5.11.4 | iscsi | - | https://blog.grimm-co.com/2021/03/new-old-bugs-in-linux-kernel.html
+CVE-2019-15666 | XFRM policy UAF (lucky0) | kernel | 3.0:5.0.19 | userns | - | https://duasynt.com/blog/ubuntu-centos-redhat-privesc
+CVE-2018-18955 | subuid shell (nested userns id map) | kernel | 4.15:4.19.2 | userns newuidmap | - | https://www.exploit-db.com/exploits/45886
+CVE-2018-5333 | rds_atomic_free_op NULL deref | kernel | 4.4:4.14.14 | rds | - | https://github.com/wbowling/cpu.Bugs/tree/master/rds
+CVE-2017-7308  | af_packet packet_set_ring | kernel | 2.6.27:3.2.89,3.10.107,3.12.74,3.16.44,3.18.52,4.1.41,4.4.66,4.9.26,4.10.14 | userns | - | https://www.exploit-db.com/exploits/41994
+CVE-2016-9793  | SO_SNDBUFFORCE negative sk_sndbuf | kernel | 3.5:3.12.69,3.16.40,3.18.52,4.1.50,4.4.38,4.8.14 | userns | - | https://github.com/xairy/kernel-exploits/tree/master/CVE-2016-9793
+CVE-2016-0728  | keyring refcount overflow | kernel | 3.8:3.10.95,3.12.53,3.14.59,3.16.35,3.18.26,4.1.16,4.3.4,4.4.1 | - | - | https://www.exploit-db.com/exploits/39277
+CVE-2015-8660  | overlayfs ovl_setattr | kernel | 3.18:3.18.31,4.1.22,4.4 | userns overlay | - | https://www.exploit-db.com/exploits/39166
+CVE-2026-23268 | CrackArmor (AppArmor policy race) | kernel | 4.11:5.10.253,5.15.203,6.1.169,6.6.130,6.12.77,6.18.18,6.19.8 | apparmor | - | https://nvd.nist.gov/vuln/detail/CVE-2026-23268
+CVE-2026-8933  | snap-confine file-capabilities race | snapd | 2.75:2.76.1 | snap_confine_caps | - | https://cdn2.qualys.com/advisory/2026/07/21/snap-confine-set-capabilities.txt
+CVE-2026-3888  | snap-confine + systemd-tmpfiles /tmp/.snap race | snapd | - | snap_confine_priv snap_tmpfiles | - | https://cdn2.qualys.com/advisory/2026/03/17/snap-confine-systemd-tmpfiles.txt
+CVE-2026-41651 | Pack2TheRoot (PackageKit transaction TOCTOU) | packagekit | 1.0.2:1.3.5 | packagekit_dbus | - | https://github.security.telekom.com/2026/04/pack2theroot-linux-local-privilege-escalation.html
+CVE-2025-6019  | libblockdev/udisks2 resize mount without nosuid | libblockdev | 0:3.3.1 | allow_active udisksd | - | https://www.qualys.com/2025/06/17/suse15-pam-udisks-lpe.txt
+CVE-2025-6018  | SUSE PAM pam_env grants allow_active (chains 6019) | pam | 1.3.0:1.3.1 | suse_pam_env | - | https://www.qualys.com/2025/06/17/suse15-pam-udisks-lpe.txt
+CVE-2026-7867  | UDisks user-mountable fstab entry | udisks2 | 2.10.0:2.11.2 | udisks_fstab | - | https://nvd.nist.gov/vuln/detail/CVE-2026-7867
+CVE-2026-61897 | AccountsService set-language-helper (Ubuntu) | accountsservice | - | ubuntu_os set_language_helper | - | https://ubuntu.com/security/CVE-2026-61897
+CVE-2026-16742 | systemd-homed identity handling | systemd | 245:258 258:258.10 259:259.8 260:260.4 261:261.2 | homed | - | https://nvd.nist.gov/vuln/detail/CVE-2026-16742
+CVE-2026-24061 | GNU inetutils telnetd USER=-f root (telnet localhost) | telnetd | 1.9.3:2.8 | telnetd_listen | - | https://nvd.nist.gov/vuln/detail/CVE-2026-24061
+CVE-2025-27591 | below world-writable log dir symlink | below | 0:0.9.0 | below_logdir | - | https://nvd.nist.gov/vuln/detail/CVE-2025-27591
+CVE-2024-32019 | netdata ndsudo PATH hijack | ndsudo | 1.44.0:1.45.3 | suid | - | https://github.com/netdata/netdata/security/advisories/GHSA-pmhq-4cxq-wj93
+CVE-2024-21626 | Leaky Vessels (runc WORKDIR fd leak) | runc | 1.0.0:1.1.12 | container_access | - | https://snyk.io/blog/leaky-vessels-docker-runc-container-breakout-vulnerabilities/
+CVE-2023-28339 | OpenDoas TIOCSTI terminal injection | doas | 0:6.8.3 | suid tiocsti | - | https://nvd.nist.gov/vuln/detail/CVE-2023-28339
+CVE-2019-25016 | OpenDoas keeps the caller PATH | doas | 6.6:6.8.1 | suid | - | https://nvd.nist.gov/vuln/detail/CVE-2019-25016
+CVE-2021-33909 | Sequoia (seq_file size_t) | kernel | 3.12.43:3.13 3.16:4.4.276,4.9.276,4.14.240,4.19.198,5.4.134,5.10.52,5.12.19,5.13.4 | userns | - | https://www.qualys.com/2021/07/20/cve-2021-33909/sequoia-local-privilege-escalation-linux.txt
 '
 
 # Distro fixed versions (backports). id | entries
@@ -147,6 +227,62 @@ CVE-2023-26604 | xenial=unfixed bionic=unfixed focal=unfixed buster=241-7~deb10u
 CVE-2016-8655  | k=3.13.0-105.152 k=4.4.0-53.74
 CVE-2017-6074  | k=3.13.0-110.157 k=4.4.0-64.85 k=4.8.0-39.42
 CVE-2021-3490  | k=5.8.0-53.60 k=5.11.0-17.18
+CVE-2026-43284 | k=4.15.0-251.263 k=5.4.0-231.251 k=5.15.0-181.191 k=6.8.0-124.124 k=6.17.0-35.35 k=7.0.0-22.22 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-43500 | k=5.4.0-231.251 k=5.15.0-181.191 k=6.8.0-124.124 k=6.17.0-35.35 k=7.0.0-22.22 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-46300 | k=3.13.0-214.265 k=4.4.0-283.317 k=4.15.0-253.265 k=5.4.0-233.253 k=5.15.0-181.191 k=6.8.0-124.124 k=6.17.0-35.35 k=7.0.0-22.22 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-43503 | k=3.13.0-214.265 k=4.4.0-283.317 k=4.15.0-253.265 k=5.4.0-233.253 k=5.15.0-181.191 k=6.8.0-124.124 k=6.17.0-35.35 k=7.0.0-22.22 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-46331 | k=!4.15.0-254.266 k=5.4.0-234.254 k=5.15.0-187.197 k=6.8.0-137.137 k=6.17.0-42.42 k=7.0.0-29.29 k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-46333 | k=5.15.0-181.191 k=6.8.0-124.124 k=6.17.0-35.35 k=7.0.0-22.22 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-43499 | k=3.13.0-215.266 k=4.4.0-284.318 k=4.15.0-254.266 k=5.4.0-234.254 k=5.15.0-187.197 k=6.8.0-136.136 k=6.17.0-42.42 k=7.0.0-27.27 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-53361 | k=!6.8.0-147.147 k=7.0.0-31.31 k=6.11.0-EOL k=6.14.0-EOL k=6.17.0-EOL
+CVE-2026-31431 | k=4.15.0-250.262 k=5.4.0-230.250 k=5.15.0-179.189 k=6.8.0-117.117 k=6.17.0-29.29 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-46242 | k=!5.15.0-202.212 k=!6.8.0-137.137 k=6.17.0-42.42 k=7.0.0-28.28 k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-64531 | k=!5.15.0-190.200 k=!6.8.0-138.138 k=7.0.0-30.30 k=6.14.0-EOL
+CVE-2026-31635 | k=6.17.0-40.40
+CVE-2025-38236 | k=5.15.0-170.180 k=6.8.0-100.100 k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL
+CVE-2025-38352 | k=3.13.0-210.261 k=4.4.0-274.308 k=4.15.0-243.255 k=5.4.0-223.243 k=5.15.0-156.166 k=6.8.0-87.88 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL
+CVE-2025-21756 | k=5.15.0-138.148 k=6.8.0-58.60 k=6.11.0-24.24 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL
+CVE-2024-50264 | k=4.15.0-232.244 k=5.4.0-204.224 k=5.15.0-130.140 k=6.8.0-51.52 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL
+CVE-2024-0582  | k=6.5.0-21.21
+CVE-2023-35001 | k=3.13.0-194.245 k=4.4.0-243.277 k=4.15.0-214.225 k=5.4.0-155.172 k=5.15.0-78.85 k=5.19.0-50.50 k=6.2.0-26.26 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL
+CVE-2023-0179  | k=5.15.0-67.74 k=5.19.0-35.36 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL
+CVE-2023-3269  | k=6.2.0-26.26
+CVE-2022-32250 | k=4.4.0-227.261 k=4.15.0-184.194 k=5.4.0-117.132 k=5.13.0-48.54 k=5.15.0-37.39 k=5.8.0-EOL k=5.11.0-EOL
+CVE-2022-2586  | k=4.4.0-231.265 k=4.15.0-191.202 k=5.4.0-124.140 k=5.15.0-46.49 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL
+CVE-2022-2639  | k=4.4.0-234.268 k=!4.15.0-189.200 k=5.4.0-122.138 k=5.15.0-41.44 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL
+CVE-2022-0995  | k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL
+CVE-2026-46243 | k=3.13.0-214.265 k=4.4.0-283.317 k=4.15.0-253.265 k=5.4.0-233.253 k=5.15.0-185.195 k=6.8.0-134.134 k=6.17.0-40.40 k=7.0.0-27.27 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-74469 | k=4.15.0-unfixed k=5.4.0-unfixed k=5.15.0-198.208 k=6.8.0-149.149 k=7.0.0-42.42 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-53264 | k=4.15.0-unfixed k=5.4.0-unfixed k=5.15.0-198.208 k=6.8.0-146.146 k=6.17.0-unfixed k=7.0.0-31.31 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-23111 | k=5.15.0-unfixed k=6.8.0-107.107 k=6.17.0-20.20 k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2025-39964 | k=3.13.0-unfixed k=4.4.0-276.310 k=4.15.0-245.257 k=5.4.0-224.244 k=5.15.0-164.174 k=6.8.0-90.91 k=6.14.0-37.37 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL
+CVE-2025-37891 | k=6.8.0-100.100 k=6.14.0-24.24 k=6.11.0-EOL
+CVE-2026-80977/CVE-2026-89487/CVE-2026-90049 | k=3.13.0-unfixed k=4.4.0-unfixed k=4.15.0-unfixed k=5.4.0-unfixed k=5.15.0-202.212 k=6.8.0-149.149 k=7.0.0-42.42 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-80530 | k=7.0.0-42.42 k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-64600 | k=4.15.0-unfixed k=5.4.0-unfixed k=5.15.0-198.208 k=6.8.0-147.147 k=7.0.0-31.31 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-53362 | k=6.8.0-147.147 k=6.17.0-unfixed k=7.0.0-31.31 k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-64564 | k=3.13.0-unfixed k=4.4.0-unfixed k=4.15.0-unfixed k=5.4.0-247.267 k=5.15.0-198.208 k=6.8.0-147.147 k=7.0.0-38.38 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-53365 | k=6.8.0-147.147 k=7.0.0-28.28 k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-43502 | k=5.4.0-unfixed k=5.15.0-186.196 k=6.8.0-136.136 k=6.17.0-unfixed k=7.0.0-28.28 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2025-21702 | k=3.13.0-unfixed k=4.4.0-267.301 k=4.15.0-236.248 k=5.4.0-214.234 k=5.15.0-138.148 k=6.8.0-58.60 k=6.11.0-24.24 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL
+CVE-2021-27365 | k=3.13.0-185.236 k=4.4.0-206.238 k=4.15.0-139.143 k=5.4.0-70.78
+CVE-2019-15666 | k=4.4.0-157.185 k=4.15.0-60.67
+CVE-2018-18955 | k=4.15.0-42.45
+CVE-2018-5333  | k=3.13.0-142.191 k=4.4.0-119.143
+CVE-2017-7308  | k=3.13.0-116.163 k=4.4.0-72.93
+CVE-2016-9793  | k=3.13.0-107.154 k=4.4.0-59.80
+CVE-2016-0728  | k=3.13.0-76.120
+CVE-2026-23268 | k=4.15.0-249.261 k=5.4.0-227.247 k=5.15.0-173.183 k=6.8.0-106.106 k=6.17.0-19.19 k=5.8.0-EOL k=5.11.0-EOL k=5.13.0-EOL k=5.19.0-EOL k=6.2.0-EOL k=6.5.0-EOL k=6.11.0-EOL k=6.14.0-EOL
+CVE-2026-8933  | jammy=2.76+ubuntu22.04.1 noble=2.76+ubuntu24.04.1 resolute=2.76+ubuntu26.04.3 trixie=unfixed forky=2.76.3-1
+CVE-2026-3888  | xenial=!2.61.4ubuntu0.16.04.1+esm2 bionic=!2.61.4ubuntu0.18.04.1+esm2 focal=!2.67.1+20.04ubuntu1~esm1 jammy=!2.73+ubuntu22.04.1 noble=!2.73+ubuntu24.04.2 questing=!2.73+ubuntu25.10.1 resolute=!2.74.1+ubuntu26.04.3 bookworm=!2.57.6-1+deb12u1 trixie=!2.68.3-3+deb13u1 forky=!2.76-1
+CVE-2026-41651 | xenial=!0.8.17-4ubuntu6~gcc5.4ubuntu1.5+esm1 bionic=1.1.9-1ubuntu2.18.04.6+esm1 focal=1.1.13-2ubuntu1.1+esm1 jammy=1.2.5-2ubuntu3.1 noble=1.2.8-2ubuntu1.5 questing=1.3.1-1ubuntu1.1 resolute=1.3.4-3ubuntu1 bullseye=1.2.2-2+deb11u1 bookworm=1.2.6-5+deb12u1 trixie=1.3.1-1+deb13u1
+CVE-2025-6019  | bionic=2.16-2ubuntu0.1~esm1 focal=2.23-2ubuntu3+esm1 jammy=2.26-1ubuntu0.1 noble=3.1.1-1ubuntu0.1 bullseye=2.25-2+deb11u1 bookworm=2.28-2+deb12u1 trixie=3.3.0-2.1 forky=3.3.0-2.1
+CVE-2026-7867  | noble=2.10.1-6ubuntu1.5 resolute=2.10.91-1ubuntu2.1 trixie=2.10.1-12.1+deb13u2
+CVE-2026-61897 | trusty=!0.6.35-0ubuntu7.3+esm4 xenial=!0.6.40-2ubuntu11.6+esm2 bionic=!0.6.45-1ubuntu1.3+esm2 focal=!0.6.55-0ubuntu12~20.04.7+esm1 jammy=!22.07.5-2ubuntu1.6 noble=!23.13.9-2ubuntu6.1 resolute=!23.13.9-8ubuntu5.2
+CVE-2026-16742 | jammy=249.11-0ubuntu3.22 noble=255.4-1ubuntu8.17 resolute=259.5-0ubuntu3.4 bookworm=unfixed trixie=unfixed forky=261.2-1
+CVE-2026-24061 | xenial=2:1.9.4-1ubuntu0.1~esm5 bionic=2:1.9.4-3ubuntu0.1+esm4 focal=2:1.9.4-11ubuntu0.2+esm3 jammy=2:2.2-2ubuntu0.2 noble=2:2.5-3ubuntu4.1 questing=2:2.6-1ubuntu3.1 bullseye=2:2.0-1+deb11u4 bookworm=2:2.4-2+deb12u2 trixie=2:2.6-3+deb13u1 forky=2:2.7-2
+CVE-2024-21626 | bionic=1.1.4-0ubuntu1~18.04.2+esm1 focal=1.1.7-0ubuntu1~20.04.2 jammy=1.1.7-0ubuntu1~22.04.2 buster=1.0.0~rc6+dfsg1-3+deb10u3 bullseye=1.0.0~rc93+ds1-5+deb11u3 bookworm=1.1.5+ds1-1+deb12u1
+CVE-2021-33909 | k=3.13.0-186.237 k=4.4.0-212.244 k=4.15.0-151.157 k=5.4.0-80.90 k=5.8.0-63.71 k=5.11.0-25.27
 '
 
 NL='
@@ -774,6 +910,100 @@ inv_systemd() {
   add_inst systemd "$p" "$w"
 }
 
+# first_ver TEXT -> REPLY: first word that looks like a version (leading v / trailing , stripped)
+first_ver() {
+  local w
+  REPLY=
+  set -f
+  for w in $1; do
+    w=${w#v}; w=${w%,}; w=${w%)}
+    case $w in [0-9]*.[0-9]*) REPLY=$w; set +f; return ;; esac
+  done
+  set +f
+}
+
+# inv_generic COMP VERARG PATH...: version from the owning package, else "PATH VERARG"
+# (VERARG "-" = never run the file: daemons). Files need not be executable (libraries).
+inv_generic() {
+  local comp=$1 arg=$2 p v out oifs
+  shift 2
+  FOUND=; SEEN=$NL
+  for p in "$@"; do
+    [ -f "$p" ] || continue
+    resolve "$p"
+    case $SEEN in *"$NL$REPLY$NL"*) continue ;; esac
+    SEEN="$SEEN$REPLY$NL"; FOUND="$FOUND$p$NL"
+  done
+  oifs=$IFS; IFS=$NL; set -f; set -- $FOUND; set +f; IFS=$oifs
+  for p in "$@"; do
+    v=
+    owner "$p"
+    if [ "$O_STATE" = pkg ]; then pkg_upstream "$O_VER"; v=$O_VER; v=${v#*:}; v=${v%%-*}; v=${v%%+*}; v=${v%%~*}; fi
+    if [ -z "$v" ] && [ "$arg" != - ] && [ -x "$p" ]; then
+      out=$(run_to 5 "$p" $arg 2>&1 | head -n 3)
+      first_ver "$out"; v=$REPLY
+    fi
+    [ -n "$v" ] && add_inst "$comp" "$p" "$v"
+  done
+}
+
+inv_packagekit() {
+  inv_generic packagekit --version "$R"/usr/libexec/packagekitd "$R"/usr/lib/packagekit/packagekitd \
+    "$R"/usr/lib/*/packagekitd "$R"/usr/libexec/packagekit/packagekitd
+}
+inv_libblockdev() {
+  inv_generic libblockdev - "$R"/usr/lib/*/libbd_fs.so.[0-9]* "$R"/usr/lib64/libbd_fs.so.[0-9]* \
+    "$R"/lib/*/libbd_fs.so.[0-9]* "$R"/usr/lib/libbd_fs.so.[0-9]*
+}
+inv_udisks2() {
+  inv_generic udisks2 - "$R"/usr/libexec/udisks2/udisksd "$R"/usr/lib/udisks2/udisksd
+}
+inv_accountsservice() {
+  inv_generic accountsservice - "$R"/usr/libexec/accounts-daemon "$R"/usr/lib/accountsservice/accounts-daemon \
+    "$R"/usr/libexec/accountsservice/accounts-daemon
+}
+inv_telnetd() {
+  inv_generic telnetd --version "$R"/usr/sbin/telnetd "$R"/usr/sbin/in.telnetd "$R"/usr/libexec/telnetd \
+    "$R"/usr/libexec/inetutils/telnetd "$R"/usr/local/libexec/telnetd
+}
+inv_below() {
+  find_bins below
+  set -f; set -- $FOUND; set +f
+  inv_generic below --version "$@"
+}
+inv_runc() {
+  find_bins runc docker-runc
+  set -f; set -- $FOUND; set +f
+  inv_generic runc --version "$@"
+}
+inv_doas() {
+  find_bins doas
+  set -f; set -- $FOUND; set +f
+  inv_generic doas - "$@"
+}
+inv_pam() {
+  inv_generic pam - "$R"/lib64/libpam.so.0 "$R"/usr/lib64/libpam.so.0
+}
+# netdata's SUID ndsudo helper; version from the owning package or "netdata -v"
+inv_ndsudo() {
+  local p v d out
+  for p in "$R"/usr/libexec/netdata/plugins.d/ndsudo "$R"/opt/netdata/usr/libexec/netdata/plugins.d/ndsudo \
+           "$R"/usr/lib/netdata/plugins.d/ndsudo; do
+    [ -f "$p" ] || continue
+    v=
+    owner "$p"
+    if [ "$O_STATE" = pkg ]; then v=$O_VER; v=${v#*:}; v=${v%%-*}; v=${v%%+*}; fi
+    if [ -z "$v" ]; then
+      d=${p%/libexec/netdata/plugins.d/ndsudo}; d=${d%/lib/netdata/plugins.d/ndsudo}
+      for out in "$d/sbin/netdata" "$d/bin/netdata" "${d%/usr}/bin/netdata" "$R/usr/sbin/netdata"; do
+        [ -x "$out" ] || continue
+        out=$(run_to 5 "$out" -v 2>&1 | head -n 1); first_ver "$out"; v=$REPLY; break
+      done
+    fi
+    [ -n "$v" ] && add_inst ndsudo "$p" "${v%%-*}"
+  done
+}
+
 inv_kernel() {
   local u sig a rest c p i
   K_REL=; K_BASE=; K_ABI=; K_FLAVOR=; K_KIND=other; K_NOTE=
@@ -1206,12 +1436,336 @@ pre_mmap_zero() {
   PRE_MSG="no vm.mmap_min_addr (kernel predates it: page zero mappable)"; return 0
 }
 
-pre_dccp() {
-  if ! grep -q '^dccp ' "$R/proc/modules" 2>/dev/null &&
-     grep -rqsE '^[[:space:]]*(blacklist[[:space:]]+dccp|install[[:space:]]+dccp[[:space:]]+/bin/(true|false))' "$R/etc/modprobe.d" 2>/dev/null; then
-    PRE_MSG="dccp module is blacklisted in /etc/modprobe.d"; return 1
+pre_dccp() { pre_kmod_open dccp IP_DCCP "dccp module"; }
+
+# kmod_blocked MODULE: not loaded, and modprobe.d blacklists it / installs it as true|false
+# (blacklist stops alias autoload, which is how socket families get loaded)
+kmod_blocked() {
+  local d
+  grep -q "^$1 " "$R/proc/modules" 2>/dev/null && return 1
+  ensure kernel   # built-in (=y) code cannot be blocked by modprobe.d
+  grep -qs "/$1\.ko" "$R/lib/modules/$K_REL/modules.builtin" "$R/usr/lib/modules/$K_REL/modules.builtin" && return 1
+  for d in "$R/etc/modprobe.d" "$R/run/modprobe.d" "$R/usr/lib/modprobe.d" "$R/lib/modprobe.d"; do
+    [ -d "$d" ] || continue
+    grep -rqsE "^[[:space:]]*(blacklist[[:space:]]+$1|install[[:space:]]+$1[[:space:]]+(/usr)?/bin/(true|false))([[:space:]]|\$)" "$d" && return 0
+  done
+  return 1
+}
+
+# pre_kmod_open MODULE CONFIG LABEL: available and not blocked in modprobe.d
+pre_kmod_open() {
+  if kmod_blocked "$1"; then PRE_MSG="$3 is blocked in modprobe.d (mitigation)"; return 1; fi
+  pre_kmod "$@"
+}
+
+# kconfig SYMBOL -> 0 =y/=m, 1 not set, 2 unknown (no readable kernel config)
+kconfig() {
+  local f z
+  ensure kernel
+  f="$R/boot/config-$K_REL"
+  if [ -r "$f" ]; then grep -q "^CONFIG_$1=[ym]" "$f" && return 0; return 1; fi
+  f="$R/proc/config.gz"
+  if [ -r "$f" ] && tool gzip; then
+    z=$("$REPLY" -dc "$f" 2>/dev/null)
+    if [ -n "$z" ]; then
+      case "$NL$z$NL" in *"${NL}CONFIG_$1=y$NL"*|*"${NL}CONFIG_$1=m$NL"*) return 0 ;; esac
+      return 1
+    fi
   fi
-  pre_kmod dccp IP_DCCP "dccp module"
+  return 2
+}
+
+# pre_kconfig SYMBOL LABEL [DEFAULT_ON]: kernel config option set. DEFAULT_ON=1 treats
+# an unreadable config as met (options every distro enables)
+pre_kconfig() {
+  kconfig "$1"
+  case $? in
+    0) PRE_MSG="$2 (CONFIG_$1) enabled"; return 0 ;;
+    1) PRE_MSG="$2 (CONFIG_$1) not enabled in this kernel"; return 1 ;;
+  esac
+  if [ "${3:-0}" = 1 ]; then PRE_MSG="kernel config not readable; CONFIG_$1 is on in every distro kernel"; return 0; fi
+  PRE_MSG="kernel config not readable, cannot tell whether CONFIG_$1 is set"; return 2
+}
+
+# Dirty Frag / DirtyClone / Fragnesia: esp4 or esp6 must be loadable (mitigation blocks both)
+pre_esp() {
+  local m4 r4 r6
+  pre_kmod_open esp4 INET_ESP esp4; r4=$?; m4=$PRE_MSG
+  [ $r4 = 0 ] && return 0
+  pre_kmod_open esp6 INET6_ESP esp6; r6=$?
+  [ $r6 = 0 ] && return 0
+  if [ $r4 = 1 ] && [ $r6 = 1 ]; then PRE_MSG="$m4; $PRE_MSG"; return 1; fi
+  PRE_MSG="$m4; $PRE_MSG"; return 2
+}
+pre_espintcp() {
+  kconfig INET_ESPINTCP && { PRE_MSG="ESP-in-TCP (CONFIG_INET_ESPINTCP) enabled"; return 0; }
+  pre_kconfig INET6_ESPINTCP "ESP-in-TCP over IPv6"
+}
+pre_rxrpc() { pre_kmod_open rxrpc AF_RXRPC "rxrpc module"; }
+pre_act_pedit() { pre_kmod_open act_pedit NET_ACT_PEDIT "act_pedit (tc pedit action)"; }
+pre_algif_aead() { pre_kmod_open algif_aead CRYPTO_USER_API_AEAD "algif_aead (AF_ALG AEAD)"; }
+pre_openvswitch() { pre_kmod_open openvswitch OPENVSWITCH "openvswitch datapath"; }
+pre_futex_pi() { pre_kconfig FUTEX_PI "PI futexes" 1; }
+pre_unix_oob() { pre_kconfig AF_UNIX_OOB "AF_UNIX MSG_OOB" 1; }
+pre_watch_queue() { pre_kconfig WATCH_QUEUE "watch_queue"; }
+
+pre_rxgk() {
+  pre_kconfig RXGK "rxrpc GSSAPI security (rxgk; off on Ubuntu/Debian stable)" || return
+  pre_rxrpc
+}
+
+pre_vsock() {
+  if [ -e "$R/dev/vsock" ]; then PRE_MSG="/dev/vsock present (AF_VSOCK loaded)"; return 0; fi
+  pre_kmod_open vsock VSOCKETS "vsock (AF_VSOCK)"
+}
+
+pre_io_uring() {
+  local f=$R/proc/sys/kernel/io_uring_disabled v
+  if [ -r "$f" ]; then
+    read -r v < "$f"
+    case $v in
+      2) PRE_MSG="io_uring disabled (kernel.io_uring_disabled=2)"; return 1 ;;
+      1) PRE_MSG="io_uring limited to kernel.io_uring_group members (io_uring_disabled=1)"; return 2 ;;
+    esac
+  fi
+  pre_kconfig IO_URING io_uring 1
+}
+
+pre_sctp() { pre_kmod_open sctp IP_SCTP "sctp module"; }
+pre_sctp_diag() { pre_sctp || return; pre_kmod_open sctp_diag INET_SCTP_DIAG "sctp_diag module"; }
+pre_rds_tcp() { pre_kmod_open rds RDS "rds module" || return; pre_kmod_open rds_tcp RDS_TCP "rds_tcp module"; }
+pre_af_alg() { pre_kmod_open algif_skcipher CRYPTO_USER_API_SKCIPHER "algif_skcipher (AF_ALG)"; }
+pre_snd_ump() { pre_kconfig SND_UMP "ALSA UMP (MIDI 2.0)"; }
+pre_ipv6() { pre_kconfig IPV6 IPv6 1; }
+pre_iscsi() { pre_kmod_open scsi_transport_iscsi SCSI_ISCSI_ATTRS "iSCSI transport (scsi_transport_iscsi)"; }
+pre_net_sched() {
+  pre_kmod_open act_gact NET_ACT_GACT "act_gact" || return
+  pre_kmod_open cls_flower NET_CLS_FLOWER "cls_flower"
+}
+
+pre_cifs_spnego() {
+  grep -q '^cifs ' "$R/proc/modules" 2>/dev/null || { PRE_MSG="cifs module not loaded"; return 1; }
+  if grep -rqsE '^[[:space:]]*create[[:space:]]+cifs\.spnego' "$R/etc/request-key.conf" "$R/etc/request-key.d"; then
+    PRE_MSG="cifs loaded and a request-key cifs.spnego upcall rule exists"; return 0
+  fi
+  PRE_MSG="no request-key cifs.spnego rule (cifs-utils upcall not configured)"; return 1
+}
+
+pre_newuidmap() {
+  local p
+  for p in "$R/usr/bin/newuidmap" "$R/bin/newuidmap"; do
+    is_suid_root "$p" && { PRE_MSG="SUID newuidmap present"; return 0; }
+  done
+  PRE_MSG="no SUID-root newuidmap (uidmap package)"; return 1
+}
+
+# XFS mounted with reflink=1 (xfs_info reads the superblock geometry of a mounted fs)
+pre_xfs_reflink() {
+  local mps mp out x seen0=0 unk=0 oifs
+  mps=$(grep ' xfs ' "$R/proc/mounts" 2>/dev/null) || { PRE_MSG="no XFS filesystem mounted"; return 1; }
+  [ -n "$mps" ] || { PRE_MSG="no XFS filesystem mounted"; return 1; }
+  tool xfs_info || { PRE_MSG="XFS mounted; no xfs_info to read reflink"; return 2; }
+  x=$REPLY
+  oifs=$IFS; IFS=$NL; set -f; set -- $mps; set +f; IFS=$oifs
+  for mp in "$@"; do
+    set -- $mp; mp=$2
+    out=$(run_to 5 "$x" "$mp" 2>/dev/null)
+    case $out in
+      *reflink=1*) PRE_MSG="XFS with reflink=1 mounted at $mp"; return 0 ;;
+      *reflink=0*) seen0=1 ;;
+      *) unk=1 ;;
+    esac
+  done
+  if [ $unk = 0 ] && [ $seen0 = 1 ]; then PRE_MSG="XFS mounted, but reflink=0 everywhere"; return 1; fi
+  PRE_MSG="XFS mounted; reflink state unreadable"; return 2
+}
+
+pre_apparmor() {
+  local v
+  if [ -r "$R/sys/module/apparmor/parameters/enabled" ]; then
+    read -r v < "$R/sys/module/apparmor/parameters/enabled"
+    [ "$v" = Y ] && { PRE_MSG="AppArmor enabled"; return 0; }
+    PRE_MSG="AppArmor disabled"; return 1
+  fi
+  [ -d "$R/sys/kernel/security/apparmor" ] && { PRE_MSG="AppArmor securityfs present"; return 0; }
+  PRE_MSG="AppArmor not active"; return 1
+}
+
+pre_ubuntu_os() {
+  case " $OS_ID $OS_LIKE " in *" ubuntu "*) PRE_MSG="Ubuntu"; return 0 ;; esac
+  PRE_MSG="not Ubuntu (set-language-helper is an Ubuntu patch)"; return 1
+}
+
+# snap-confine variants: SC_SUID (any SUID-root copy), SC_CAPS (getcap shows cap_sys_admin), SC_CAPS_UNK
+snap_confine_scan() {
+  local p out g
+  SC_SUID=; SC_CAPS=; SC_CAPS_UNK=; SC_ANY=
+  g=; tool getcap && g=$REPLY
+  for p in "$R"/usr/lib/snapd/snap-confine "$R"/usr/libexec/snapd/snap-confine "$R"/snap/snapd/current/usr/lib/snapd/snap-confine; do
+    [ -f "$p" ] || continue
+    SC_ANY=1
+    if is_suid_root "$p"; then SC_SUID=${p#"$R"}; continue; fi
+    if [ -n "$g" ]; then
+      out=$(run_to 5 "$g" "$p" 2>/dev/null)
+      case $out in *cap_sys_admin*) SC_CAPS=${p#"$R"} ;; esac
+    else
+      SC_CAPS_UNK=${p#"$R"}
+    fi
+  done
+}
+pre_snap_confine_caps() {
+  snap_confine_scan
+  [ -n "$SC_CAPS" ] && { PRE_MSG="$SC_CAPS carries file capabilities (cap_sys_admin)"; return 0; }
+  [ -n "$SC_CAPS_UNK" ] && { PRE_MSG="non-SUID $SC_CAPS_UNK, no getcap to read its capabilities"; return 2; }
+  [ -n "$SC_ANY" ] && { PRE_MSG="snap-confine is the SUID build, not the file-capabilities one"; return 1; }
+  PRE_MSG="no snap-confine"; return 1
+}
+pre_snap_confine_priv() {
+  snap_confine_scan
+  [ -n "$SC_SUID" ] && { PRE_MSG="$SC_SUID is SUID root"; return 0; }
+  [ -n "$SC_CAPS" ] && { PRE_MSG="$SC_CAPS has cap_sys_admin"; return 0; }
+  [ -n "$SC_CAPS_UNK" ] && { PRE_MSG="non-SUID $SC_CAPS_UNK, capabilities unreadable"; return 2; }
+  PRE_MSG="no privileged snap-confine"; return 1
+}
+# the race needs systemd-tmpfiles to age out /tmp/.snap (Ubuntu: 30d on 24.04, 10d on 25.10+)
+pre_snap_tmpfiles() {
+  local f age t
+  f=; for t in "$R/etc/tmpfiles.d/tmp.conf" "$R/usr/lib/tmpfiles.d/tmp.conf" "$R/lib/tmpfiles.d/tmp.conf"; do
+    [ -r "$t" ] && { f=$t; break; }
+  done
+  [ -n "$f" ] || { PRE_MSG="no tmpfiles.d tmp.conf"; return 1; }
+  age=$(grep -E '^[[:space:]]*[dDqQ][[:space:]]+/tmp[[:space:]]' "$f" | grep -E '[[:space:]][0-9]+[smhdw][[:space:]]*$' | head -n 1)
+  [ -n "$age" ] || { PRE_MSG="${f#"$R"} does not age /tmp"; return 1; }
+  set -f; set -- $age; set +f; eval "age=\${$#}"
+  for t in "$R"/etc/systemd/system/systemd-tmpfiles-clean.timer "$R"/usr/lib/systemd/system/systemd-tmpfiles-clean.timer "$R"/lib/systemd/system/systemd-tmpfiles-clean.timer; do
+    [ -e "$t" ] && { PRE_MSG="/tmp aged after $age (${f#"$R"}), systemd-tmpfiles-clean.timer present"; return 0; }
+  done
+  PRE_MSG="/tmp age rule $age but no systemd-tmpfiles-clean.timer"; return 2
+}
+
+pre_packagekit_dbus() {
+  local f
+  for f in "$R"/usr/share/dbus-1/system-services/org.freedesktop.PackageKit.service; do
+    [ -e "$f" ] && { PRE_MSG="PackageKit D-Bus service activatable"; return 0; }
+  done
+  PRE_MSG="no PackageKit D-Bus service file"; return 2
+}
+
+pre_udisksd() {
+  local p
+  for p in "$R"/usr/libexec/udisks2/udisksd "$R"/usr/lib/udisks2/udisksd; do
+    [ -x "$p" ] && { PRE_MSG="udisksd present"; return 0; }
+  done
+  PRE_MSG="no udisksd"; return 1
+}
+
+# polkit allow_active: the caller must be in an active local session (or SUSE's CVE-2025-6018)
+pre_allow_active() {
+  local out sid
+  sid=${XDG_SESSION_ID:-}
+  if [ -n "$sid" ] && tool loginctl; then
+    out=$(run_to 5 "$REPLY" show-session "$sid" -p Active -p Remote 2>/dev/null)
+    case $out in
+      *Active=yes*Remote=no*|*Remote=no*Active=yes*) PRE_MSG="active local session $sid (polkit allow_active)"; return 0 ;;
+      *Remote=yes*|*Active=no*)
+        case " $OS_ID $OS_LIKE " in *suse*) PRE_MSG="remote session, but SUSE: CVE-2025-6018 can make it allow_active"; return 2 ;; esac
+        PRE_MSG="session $sid is remote or inactive: polkit allow_active not granted"; return 1 ;;
+    esac
+  fi
+  case " $OS_ID $OS_LIKE " in *suse*) PRE_MSG="SUSE: allow_active reachable via CVE-2025-6018"; return 2 ;; esac
+  PRE_MSG="no logind session (cron/SSH without pam_systemd?): allow_active unlikely"; return 2
+}
+
+pre_suse_pam_env() {
+  case " $OS_ID $OS_LIKE " in *suse*) ;; *) PRE_MSG="not SUSE (the PAM stack issue is SUSE 15 specific)"; return 1 ;; esac
+  if grep -qs '^[[:space:]]*auth.*pam_env' "$R/etc/pam.d/common-auth"; then PRE_MSG="SUSE, pam_env in common-auth"; return 0; fi
+  PRE_MSG="SUSE, but pam_env not in /etc/pam.d/common-auth"; return 1
+}
+
+pre_udisks_fstab() {
+  local m
+  m=$(grep -vE '^[[:space:]]*#' "$R/etc/fstab" 2>/dev/null | grep -E '[[:space:]]([^[:space:]]*,)?(user|users|x-udisks-auth)(,[^[:space:]]*)?[[:space:]]' | head -n 1)
+  [ -n "$m" ] && { trim "$m"; PRE_MSG="user-mountable fstab entry: $REPLY"; return 0; }
+  PRE_MSG="no fstab entry with user/users/x-udisks-auth"; return 1
+}
+
+pre_set_language_helper() {
+  local p
+  for p in "$R"/usr/libexec/accountsservice/set-language-helper "$R"/usr/lib/accountsservice/set-language-helper; do
+    [ -e "$p" ] && { PRE_MSG="set-language-helper present"; return 0; }
+  done
+  PRE_MSG="no set-language-helper"; return 1
+}
+
+pre_homed() {
+  [ -S "$R/run/systemd/userdb/io.systemd.Home" ] || [ -e "$R/run/systemd/userdb/io.systemd.Home" ] ||
+    { PRE_MSG="systemd-homed not running (no io.systemd.Home socket)"; return 1; }
+  PRE_MSG="systemd-homed running (io.systemd.Home socket)"; return 0
+}
+
+# telnetd reachable: something listens on tcp/23, or inetd/xinetd/systemd enables telnet
+pre_telnetd_listen() {
+  local f
+  for f in "$R/proc/net/tcp" "$R/proc/net/tcp6"; do
+    grep -qsE '^[[:space:]]*[0-9]+: [0-9A-F]+:0017 [0-9A-F]+:0000 0A' "$f" && { PRE_MSG="something listens on tcp/23"; return 0; }
+  done
+  grep -qsE '^[[:space:]]*telnet[[:space:]]' "$R/etc/inetd.conf" && { PRE_MSG="telnet enabled in /etc/inetd.conf"; return 0; }
+  if grep -qsE 'disable[[:space:]]*=[[:space:]]*no' "$R/etc/xinetd.d/telnet"; then PRE_MSG="telnet enabled in xinetd"; return 0; fi
+  ls "$R"/etc/systemd/system/sockets.target.wants/*telnet* >/dev/null 2>&1 && { PRE_MSG="telnet socket unit enabled"; return 0; }
+  [ -r "$R/proc/net/tcp" ] && { PRE_MSG="nothing listens on tcp/23 and telnet is not enabled"; return 1; }
+  PRE_MSG="cannot tell whether telnetd is listening"; return 2
+}
+
+pre_below_logdir() {
+  local d=$R/var/log/below
+  [ -d "$d" ] || { PRE_MSG="no /var/log/below"; return 1; }
+  [ -L "$d" ] && { PRE_MSG="/var/log/below is a symlink"; return 1; }
+  if [ -k "$d" ]; then PRE_MSG="/var/log/below is sticky"; return 1; fi
+  if [ -w "$d" ]; then PRE_MSG="/var/log/below is writable by this user and not sticky"; return 0; fi
+  PRE_MSG="/var/log/below not writable by this user"; return 1
+}
+
+# runc escapes need a way to start containers: docker group / writable docker.sock
+pre_container_access() {
+  local g s
+  for g in $MY_GROUPS; do
+    case $g in docker) PRE_MSG="in the docker group (already root-equivalent; runc bug adds a host escape)"; return 0 ;; esac
+  done
+  for s in "$R/var/run/docker.sock" "$R/run/docker.sock" "$R/run/containerd/containerd.sock"; do
+    [ -w "$s" ] && { PRE_MSG="${s#"$R"} is writable"; return 0; }
+  done
+  PRE_MSG="no docker group / writable container socket (needs a way to start containers)"; return 1
+}
+
+pre_tiocsti() {
+  local f=$R/proc/sys/dev/tty/legacy_tiocsti v
+  if [ -r "$f" ]; then
+    read -r v < "$f"
+    [ "$v" = 1 ] && { PRE_MSG="dev.tty.legacy_tiocsti=1"; return 0; }
+    PRE_MSG="dev.tty.legacy_tiocsti=$v blocks TIOCSTI injection"; return 1
+  fi
+  ensure kernel
+  if [ -n "$K_BASE" ]; then
+    ver_cmp "$K_BASE" 6.2
+    [ $VC -lt 0 ] && { PRE_MSG="kernel $K_BASE < 6.2 always allows TIOCSTI"; return 0; }
+  fi
+  PRE_MSG="no dev.tty.legacy_tiocsti sysctl"; return 2
+}
+
+# CVE-2026-46333: public exploits use pidfd_getfd (5.6+); yama ptrace_scope >= 2 blocks them
+pre_ptrace_scope() {
+  local f=$R/proc/sys/kernel/yama/ptrace_scope v
+  ensure kernel
+  if [ -n "$K_BASE" ]; then
+    ver_cmp "$K_BASE" 5.6
+    if [ $VC -lt 0 ]; then PRE_MSG="kernel $K_BASE < 5.6 has no pidfd_getfd (the public exploit path)"; return 1; fi
+  fi
+  if [ -r "$f" ]; then
+    read -r v < "$f"
+    if [ "$v" -ge 2 ] 2>/dev/null; then PRE_MSG="kernel.yama.ptrace_scope=$v blocks it"; return 1; fi
+    PRE_MSG="kernel.yama.ptrace_scope=$v (< 2)"; return 0
+  fi
+  PRE_MSG="no Yama ptrace_scope (not restricted)"; return 0
 }
 
 # ---------------------------------------------------------------- safe probes
@@ -1237,7 +1791,7 @@ probe_samedit() {
 }
 
 probe_chroot() {
-  local d="/nonexistent-lpecheck-$$" out line
+  local d="/nonexistent-lpehunt-$$" out line
   [ -e "$d" ] && { PROBE_MSG="probe skipped"; return 2; }
   out=$(cd / && run_to 6 "$C_PATH" -n -R "$d" true 2>&1)
   first_line "$out"; line=$REPLY
@@ -1282,6 +1836,8 @@ fixdb_verdict() {
       [ "$series" = "${K_ABI%%-*}" ] || continue
       if [ "${val#*-}" = EOL ]; then
         FD=vuln; FD_MSG="Ubuntu $series kernel series went end-of-life without this fix"
+      elif [ "${val#*-}" = unfixed ]; then
+        FD=vuln; FD_MSG="Ubuntu $series kernel has no fix for this (Ubuntu CVE tracker)"
       else
         ver_cmp "${K_ABI/-/.}" "${val/-/.}"
         if [ $VC -lt 0 ]; then
@@ -1517,8 +2073,8 @@ timing_table() {
 }
 
 usage() {
-  printf 'lpecheck %s - detect known Linux local privilege-escalation CVEs (detection only)\n' "$LPE_VERSION"
-  printf 'usage: lpecheck.sh [-v] [--tsv] [--no-probes]\n'
+  printf 'lpehunt %s - detect known Linux local privilege-escalation CVEs (detection only)\n' "$LPE_VERSION"
+  printf 'usage: lpehunt.sh [-v] [--tsv] [--no-probes]\n'
   printf '  -v           list ruled-out CVEs with reasons, expand POSSIBLE\n'
   printf '  --tsv        STATUS<TAB>CVE<TAB>component<TAB>path<TAB>reason\n'
   printf '  --no-probes  no sudo -l / sudoedit -s / sudo -R / unshare, version logic only\n'
@@ -1547,7 +2103,7 @@ main() {
   now_ms; T_setup=$((NOW - t0))
 
   if [ $OPT_TSV = 0 ]; then
-    printf '%slpecheck %s%s  %s@%s  %s  kernel %s  pkg:%s\n' "$C_B" "$LPE_VERSION" "$C_0" \
+    printf '%slpehunt %s%s  %s@%s  %s  kernel %s  pkg:%s\n' "$C_B" "$LPE_VERSION" "$C_0" \
       "${ME:-?}" "$(uname -n 2>/dev/null)" "$OS_PRETTY${OS_CODE:+ [$OS_CODE]}" "${K_REL:-?}" "${PM_AUTH:- none}"
     [ "$MY_UID" = 0 ] && printf 'note: already running as root\n'
     echo
